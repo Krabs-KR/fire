@@ -1,104 +1,211 @@
 import streamlit as st
 import cv2
 import numpy as np
+import pandas as pd
+import time
+from datetime import datetime
 from virtual_core import VirtualEvacuationSystem
 
-# 페이지 설정
-st.set_page_config(page_title="스마트 지하상가 대피 유도 시스템", layout="wide")
+# === 1. 페이지 설정 (반드시 맨 처음에 위치) ===
+st.set_page_config(
+    page_title="스마트 지하상가 관제 대시보드",
+    page_icon="🚨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# CSS 커스텀
+# === 2. 고급 스타일링 (CSS) ===
 st.markdown("""
     <style>
-    .stButton>button {
-        width: 100%;
-        height: 50px;
-        font-weight: bold;
+    /* 전체 배경 및 폰트 설정 */
+    .stApp {
+        background-color: #0e1117;
     }
-    .status-box {
+    
+    /* 메트릭 박스 스타일 */
+    div[data-testid="stMetric"] {
+        background-color: #262730;
+        border: 1px solid #464b5c;
         padding: 15px;
         border-radius: 10px;
-        background-color: #f0f2f6;
-        margin-bottom: 10px;
+        color: white;
+    }
+    
+    /* 경고 문구 스타일 */
+    .alert-box {
+        padding: 20px;
+        background-color: #ff4b4b;
+        color: white;
+        border-radius: 10px;
         text-align: center;
+        font-weight: bold;
+        font-size: 1.5em;
+        animation: blinker 1s linear infinite;
+        margin-bottom: 20px;
+    }
+    
+    @keyframes blinker {
+        50% { opacity: 0; }
+    }
+    
+    /* 데이터 테이블 스타일 */
+    .dataframe {
+        font-size: 0.8rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
+# === 3. 시스템 초기화 (캐싱 사용) ===
 @st.cache_resource
 def get_system():
-    # 이미지 파일 경로 확인 필수 (background.png)
-    return VirtualEvacuationSystem("background.png")
+    try:
+        # 배경 이미지 로드 (파일 경로 확인 필요)
+        return VirtualEvacuationSystem("background.png")
+    except Exception as e:
+        return None
 
-try:
-    system = get_system()
-except Exception as e:
-    st.error(f"시스템 초기화 오류: {e}")
+system = get_system()
+
+# === 4. HUD 그리기 함수 (시각적 개선 핵심) ===
+def draw_hud(img, active_fires):
+    """
+    이미지를 고해상도로 리사이징하고 관제 시스템 느낌의 오버레이를 그립니다.
+    """
+    # 1. 고화질 리사이징 (2배 확대 + 큐빅 보간법으로 부드럽게)
+    scale_factor = 2.0
+    h, w = img.shape[:2]
+    new_w, new_h = int(w * scale_factor), int(h * scale_factor)
+    img_hq = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+    
+    # 2. 오버레이 레이어 생성
+    overlay = img_hq.copy()
+    
+    # 3. HUD 정보 표시 (시간, 상태)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cv2.putText(overlay, f"REC | {now}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+    
+    # 4. 화재 발생 시 경고 테두리
+    if active_fires:
+        # 빨간색 테두리 깜빡임 효과 (Streamlit은 정적이라 단순히 빨간 테두리)
+        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 0, 255), 20)
+        cv2.putText(overlay, "WARNING: FIRE DETECTED", (new_w//2 - 200, 100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+    else:
+        # 정상 상태 녹색 테두리
+        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 255, 0), 10)
+        cv2.putText(overlay, "SYSTEM NORMAL", (new_w//2 - 150, 100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3, cv2.LINE_AA)
+
+    # 5. 이미지 합성 (투명도 조절로 고급스럽게)
+    final_img = cv2.addWeighted(overlay, 1.0, img_hq, 0.0, 0)
+    return final_img
+
+# === 5. 메인 로직 ===
+if system is None:
+    st.error("❌ 시스템 초기화 실패: 'background.png' 파일이 있는지 확인해주세요.")
     st.stop()
 
-# === UI 레이아웃 ===
-st.title("🚨 지하상가 스마트 대피 유도 관제 시스템")
-
-col_main, col_control = st.columns([3, 1])
-
-# === 사이드바/컨트롤 패널 (화재 시뮬레이션) ===
-with col_control:
-    st.header("🔥 화재 발생 시뮬레이션")
-    st.write("아래 버튼을 클릭하여 가상 화재를 발생시키세요.")
-    
-    # 세션 스테이트로 화재 위치 관리
-    if 'fires' not in st.session_state:
-        st.session_state.fires = []
-
-    # 화재 구역 정의 (예시 좌표)
-    fire_zones = {
-        "Zone A (좌측 통로)": (180, 250),
-        "Zone B (중앙 홀)": (480, 250),
-        "Zone C (우측 통로)": (800, 300),
-        "Zone D (상단 통로)": (480, 100)
-    }
-
-    # 화재 토글 버튼 생성
-    active_fires = []
-    for name, coords in fire_zones.items():
-        is_active = st.toggle(f"🔥 {name} 화재", value=False)
-        if is_active:
-            active_fires.append(coords)
-
+# --- 사이드바: 컨트롤 패널 ---
+with st.sidebar:
+    st.title("🎛️ 제어 패널")
     st.divider()
-    st.subheader("📡 아두이노 전송 데이터")
-    st.caption("각 도트 매트릭스에 전송될 방향 명령입니다.")
     
-    # 결과 데이터를 담을 공간 확보
-    data_placeholder = st.empty()
-
-# === 메인 화면 (맵 시각화) ===
-with col_main:
-    # 로직 실행
-    result_img, directions = system.process(active_fires)
+    st.subheader("🔥 화재 구역 시뮬레이션")
     
-    # OpenCV BGR -> RGB 변환
-    result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
+    # 화재 구역 정의
+    fire_zones = {
+        "A구역 (좌측 통로)": (180, 250),
+        "B구역 (중앙 홀)": (480, 250),
+        "C구역 (우측 통로)": (800, 300),
+        "D구역 (상단 통로)": (480, 100)
+    }
     
-    st.image(result_img, caption="실시간 대피 경로 모니터링", use_container_width=True)
-
-# === 데이터 패널 업데이트 ===
-with data_placeholder.container():
-    for node, direction in directions.items():
-        icon = "🛑"
-        if "UP" in direction: icon = "⬆️"
-        elif "DOWN" in direction: icon = "⬇️"
-        elif "LEFT" in direction: icon = "⬅️"
-        elif "RIGHT" in direction: icon = "➡️"
+    active_fires = []
+    
+    # 깔끔한 토글 스위치 UI
+    col_t1, col_t2 = st.columns(2)
+    for i, (name, coords) in enumerate(fire_zones.items()):
+        # 2열로 배치
+        with (col_t1 if i % 2 == 0 else col_t2):
+            if st.toggle(name, key=f"fire_{i}"):
+                active_fires.append(coords)
+    
+    st.divider()
+    
+    # 시스템 로그 (세션 상태 사용)
+    if 'logs' not in st.session_state:
+        st.session_state.logs = []
         
+    if active_fires and (len(st.session_state.logs) == 0 or "화재 발생" not in st.session_state.logs[-1]):
+        st.session_state.logs.append(f"{datetime.now().strftime('%H:%M:%S')} - ⚠️ 화재 감지됨 ({len(active_fires)}구역)")
+    elif not active_fires and len(st.session_state.logs) > 0 and "화재 발생" in st.session_state.logs[-1]:
+         st.session_state.logs.append(f"{datetime.now().strftime('%H:%M:%S')} - ✅ 상황 종료 (정상화)")
+
+    st.subheader("📝 시스템 로그")
+    log_df = pd.DataFrame(st.session_state.logs[-5:], columns=["Event Log"]) # 최근 5개만
+    st.dataframe(log_df, use_container_width=True, hide_index=True)
+
+
+# --- 메인 대시보드 ---
+st.title("🚨 스마트 지하상가 대피 유도 관제 시스템")
+
+# 1. 상단 상태 지표 (Metrics)
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("시스템 상태", "비상" if active_fires else "정상", delta_color="inverse" if active_fires else "normal")
+m2.metric("활성 화재 구역", f"{len(active_fires)} 개소", delta=f"+{len(active_fires)}" if active_fires else "0")
+m3.metric("연결된 IoT 장치", "5 대", "Online")
+m4.metric("최적 경로 계산", "실시간", "Active")
+
+st.divider()
+
+# 2. 비상 경고 배너
+if active_fires:
+    st.markdown(f'<div class="alert-box">⚠️ 비상 상황: {len(active_fires)}개 구역 화재 감지! 대피 경로가 재설정됩니다.</div>', unsafe_allow_html=True)
+
+# 3. 메인 맵 & 데이터 시각화
+col_map, col_data = st.columns([2.5, 1])
+
+with col_map:
+    # 코어 로직 실행
+    raw_img, directions = system.process(active_fires)
+    
+    # BGR -> RGB 및 HUD 적용 (고화질 변환)
+    hud_img = draw_hud(raw_img, active_fires)
+    final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
+    
+    st.image(final_img, caption="실시간 관제 모니터링 (Live Feed)", use_container_width=True)
+
+with col_data:
+    st.subheader("📡 IoT 장치 현황")
+    st.caption("각 구역 LED 유도등 상태")
+    
+    for node, direction in directions.items():
+        # 상태에 따른 색상 및 아이콘 지정
+        bg_color = "#ff4b4b" if "BLOCKED" in direction else "#262730"
+        border_color = "#ff4b4b" if "BLOCKED" in direction else "#464b5c"
+        
+        icon = "🛑"
+        desc = "진입 금지"
+        
+        if "UP" in direction: 
+            icon, desc = "⬆️", "직진/상향"
+        elif "DOWN" in direction: 
+            icon, desc = "⬇️", "후진/하향"
+        elif "LEFT" in direction: 
+            icon, desc = "⬅️", "좌회전"
+        elif "RIGHT" in direction: 
+            icon, desc = "➡️", "우회전"
+        elif "STOP" in direction:
+            icon, desc = "✅", "목적지 도착"
+            
         st.markdown(f"""
-        <div class="status-box">
-            <b>{node}</b><br>
-            <span style="font-size: 1.5em;">{icon} {direction}</span>
+        <div style="background-color: {bg_color}; border: 1px solid {border_color}; padding: 10px; border-radius: 5px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: bold; color: white;">{node.split('(')[0]}</span>
+            <span style="background-color: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 4px; color: white;">{icon} {direction}</span>
         </div>
         """, unsafe_allow_html=True)
-
-# === Arduino 연동 참고용 ===
-# 실제 구현 시에는 시리얼 통신이나 WiFi(MQTT/HTTP)로 directions 값을 전송하면 됩니다.
-# Example: 
-# import serial
-# ser.write(f"{node_id}:{direction}\n".encode())
+    
+    if active_fires:
+        st.error("경로 알고리즘이 우회로를 탐색 중입니다.")
+    else:
+        st.success("모든 경로가 최적화되었습니다.")
