@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from map import GridMap
-from navigator import Navigator
+from src.map import GridMap
+from src.navigator import Navigator
 
 class VirtualEvacuationSystem:
     def __init__(self, map_image_path):
