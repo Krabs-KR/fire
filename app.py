@@ -55,13 +55,40 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# === 3. 시스템 초기화 (캐싱 사용) ===
+# === 3. 시스템 초기화 (캐싱 & 해상도 보정) ===
 @st.cache_resource
 def get_system():
     try:
-        # 배경 이미지 로드 (파일 경로 확인 필요)
-        return VirtualEvacuationSystem("background.png")
+        # 배경 이미지 로드
+        sys = VirtualEvacuationSystem("background.png")
+        
+        # [핵심 수정] 해상도 불일치 해결을 위한 리사이징 패치
+        # 코드상 좌표(최대 약 900px)에 맞춰 배경 이미지를 적절한 크기(Width 1100px)로 조정합니다.
+        # 이렇게 하면 고해상도 이미지를 넣어도 점들이 제자리에 찍힙니다.
+        TARGET_WIDTH = 1100
+        h, w = sys.original_map.shape[:2]
+        
+        if w > TARGET_WIDTH or w < 800: # 크기가 너무 크거나 작으면 조정
+            scale = TARGET_WIDTH / w
+            new_h = int(h * scale)
+            
+            # 1. 원본 맵 리사이징
+            sys.original_map = cv2.resize(sys.original_map, (TARGET_WIDTH, new_h))
+            sys.w, sys.h = TARGET_WIDTH, new_h
+            
+            # 2. 장애물 마스크도 동일하게 리사이징
+            if hasattr(sys, 'static_obstacle_mask'):
+                 sys.static_obstacle_mask = cv2.resize(sys.static_obstacle_mask, (TARGET_WIDTH, new_h))
+            
+            # 3. 그리드맵(경로 계산용)도 변경된 크기로 재설정
+            # sys.grid_map 객체의 클래스(GridMap)를 가져와서 새로 생성
+            GridMapClass = type(sys.grid_map)
+            sys.grid_map = GridMapClass(TARGET_WIDTH, new_h, sys.grid_size)
+            
+        return sys
+        
     except Exception as e:
+        st.error(f"시스템 초기화 중 오류 발생: {e}")
         return None
 
 system = get_system()
@@ -82,22 +109,28 @@ def draw_hud(img, active_fires):
     
     # 3. HUD 정보 표시 (시간, 상태)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cv2.putText(overlay, f"REC | {now}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+    # REC 표시 (빨간점 + 텍스트)
+    cv2.circle(overlay, (40, 40), 10, (0, 0, 255), -1)
+    cv2.putText(overlay, f"REC | {now}", (60, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
     
-    # 4. 화재 발생 시 경고 테두리
+    # 4. 화재 발생 시 경고 테두리 및 오버레이
     if active_fires:
-        # 빨간색 테두리 깜빡임 효과 (Streamlit은 정적이라 단순히 빨간 테두리)
-        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 0, 255), 20)
-        cv2.putText(overlay, "WARNING: FIRE DETECTED", (new_w//2 - 200, 100), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+        # 화면 전체에 붉은 틴트 효과 (비상 상황 느낌)
+        red_overlay = np.zeros_like(overlay)
+        red_overlay[:] = (0, 0, 50) # 붉은색
+        overlay = cv2.addWeighted(overlay, 1.0, red_overlay, 0.3, 0)
+        
+        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 0, 255), 30)
+        cv2.putText(overlay, "WARNING: FIRE DETECTED", (new_w//2 - 250, 100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4, cv2.LINE_AA)
     else:
         # 정상 상태 녹색 테두리
-        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 255, 0), 10)
-        cv2.putText(overlay, "SYSTEM NORMAL", (new_w//2 - 150, 100), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3, cv2.LINE_AA)
+        cv2.rectangle(overlay, (0, 0), (new_w-1, new_h-1), (0, 255, 0), 15)
+        cv2.putText(overlay, "SYSTEM NORMAL", (new_w//2 - 180, 100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3, cv2.LINE_AA)
 
     # 5. 이미지 합성 (투명도 조절로 고급스럽게)
-    final_img = cv2.addWeighted(overlay, 1.0, img_hq, 0.0, 0)
+    final_img = cv2.addWeighted(overlay, 0.9, img_hq, 0.1, 0)
     return final_img
 
 # === 5. 메인 로직 ===
