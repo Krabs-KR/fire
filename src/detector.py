@@ -4,8 +4,7 @@ import numpy as np
 class Detector:
     def __init__(self):
         # 유지보수를 위한 임계값 설정
-        self.WALL_THRESH = 200       # 흰색 벽으로 인식할 밝기 기준 (0~255)
-        self.CANDLE_THRESH = 240     # 양초 불빛으로 인식할 밝기 기준 (매우 밝음)
+        self.WALL_THRESH = 200       # 흰색 벽으로 인식할 밝기 기준 (0~255))
         self.MIN_WALL_AREA = 500     # 잡음 제거를 위한 최소 벽 면적
         self.MIN_FIRE_AREA = 10      # 최소 불 영역 크기
 
@@ -104,23 +103,47 @@ class Detector:
 
     def detect_fire(self, frame):
         """
-        [개선됨] 양초는 '매우 밝은 점'으로 인식합니다.
-        색상보다는 밝기(Value)나 Grayscale Intensity가 효과적입니다.
+        [수정됨] 실제 불꽃(밝음) + 꺼진 양초(빨간색) 모두 감지
         """
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # === 1. 불꽃 감지 (기존 로직: 밝고 붉은 빛) ===
+        b, g, r = cv2.split(frame)
+        _, mask_bright = cv2.threshold(r, 230, 255, cv2.THRESH_BINARY)
+        r_int = r.astype(np.int16)
+        b_int = b.astype(np.int16)
+        mask_light_color = np.where((r_int - b_int) > 30, 255, 0).astype(np.uint8)
+        mask_flame = cv2.bitwise_and(mask_bright, mask_light_color)
+
+        # === 2. 빨간색 양초 본체 감지 (HSV 색상) ===
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # 매우 밝은 영역(양초 심지 불빛) 찾기
-        _, mask = cv2.threshold(gray, self.CANDLE_THRESH, 255, cv2.THRESH_BINARY)
+        # 빨간색 범위 정의 (꺼진 양초 색상)
+        # Range 1 (0 ~ 10)
+        lower_red1 = np.array([0, 100, 100])
+        upper_red1 = np.array([10, 255, 255])
+        # Range 2 (170 ~ 180)
+        lower_red2 = np.array([170, 100, 100])
+        upper_red2 = np.array([180, 255, 255])
         
-        # 영역 확장 (불의 위험 반경)
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.dilate(mask, kernel, iterations=2)
+        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask_candle_body = cv2.bitwise_or(mask_red1, mask_red2)
+
+        # === 3. 두 결과 합치기 (불꽃 OR 양초본체) ===
+        mask = cv2.bitwise_or(mask_flame, mask_candle_body)
+        
+        # 잡음 제거 및 영역 확장
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1) 
+        mask = cv2.dilate(mask, kernel, iterations=3) 
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         fire_boxes = []
         for c in contours:
             area = cv2.contourArea(c)
-            if area < self.MIN_FIRE_AREA: continue
+            
+            # 너무 작은 점 제외, 너무 큰 영역(창문 등) 제외
+            if area < self.MIN_FIRE_AREA or area > 3000: 
+                continue
             
             x, y, w, h = cv2.boundingRect(c)
             fire_boxes.append((x, y, w, h))

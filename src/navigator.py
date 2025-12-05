@@ -34,10 +34,10 @@ class Navigator:
             return "RIGHT"
         elif 22.5 <= angle < 67.5:
             return "UP-RIGHT"  # [요청하신 오른쪽 대각선]
-        elif 67.5 <= angle < 112.5:
+        elif 67.5 <= angle < 157.5:
             return "UP"
-        elif 112.5 <= angle < 157.5:
-            return "UP-LEFT"
+        # elif 112.5 <= angle < 157.5:
+        #     return "UP-LEFT"
         elif 157.5 <= angle < 202.5:
             return "LEFT"
         elif 202.5 <= angle < 247.5:
