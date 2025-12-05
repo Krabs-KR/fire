@@ -149,15 +149,16 @@ def get_system():
         return sys
         
     except Exception as e:
-        st.error(f"시스템 초기화 중 오류 발생: {e}")
+        # 배경 파일이 없어도 CCTV 모드는 동작하도록 None 반환 처리
         return None
 
 system = get_system()
 
 # === 4. HUD 그리기 함수 (시각적 개선 핵심) ===
-def draw_hud(img, active_fires):
+def draw_hud(img, active_fires, mode="VIRTUAL"):
     """
     이미지를 고해상도로 리사이징하고 관제 시스템 느낌의 오버레이를 그립니다.
+    mode: "VIRTUAL" (가상) 또는 "LIVE" (실시간 CCTV)
     """
     # 1. 고화질 리사이징 (2배 확대 + 큐빅 보간법으로 부드럽게)
     scale_factor = 2.0
@@ -175,8 +176,9 @@ def draw_hud(img, active_fires):
     cv2.rectangle(overlay, (0, 0), (new_w, 80), (0, 0, 0), -1)
     
     # REC 표시 (빨간점 + 텍스트)
+    rec_text = f"LIVE CAM | {now}" if mode == "LIVE" else f"DIGITAL TWIN | {now}"
     cv2.circle(overlay, (40, 40), 8, (0, 0, 255), -1)
-    cv2.putText(overlay, f"LIVE REC | {now}", (60, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2, cv2.LINE_AA)
+    cv2.putText(overlay, rec_text, (60, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2, cv2.LINE_AA)
     
     # 4. 화재 발생 시 경고 테두리 및 오버레이
     if active_fires:
@@ -208,19 +210,23 @@ def draw_hud(img, active_fires):
     final_img = cv2.addWeighted(overlay, 0.85, img_hq, 0.15, 0)
     return final_img
 
-# === 5. 메인 로직 ===
-if system is None:
-    st.error("❌ 시스템 초기화 실패: 'background.png' 파일이 있는지 확인해주세요.")
-    st.stop()
-
 # --- 사이드바: 컨트롤 패널 ---
 with st.sidebar:
     st.title("🎛️ SYSTEM CONTROL")
     st.caption("Central Command Interface")
+    
+    # === 모드 선택 (New) ===
+    st.subheader("📡 Monitoring Mode")
+    monitoring_mode = st.selectbox(
+        "Select Data Source",
+        ["Virtual Simulation", "Live CCTV (VPN)"],
+        index=0
+    )
+    
     st.divider()
     
-    st.subheader("🔥 Simulation Control")
-    st.markdown("구역별 가상 화재 시뮬레이션")
+    st.subheader("🔥 Event Simulation")
+    st.markdown("가상/훈련용 화재 이벤트 발생")
     
     # 화재 구역 정의 (이미지 해상도 1100px 기준 중앙 정렬 좌표)
     fire_zones = {
@@ -273,20 +279,74 @@ if active_fires:
 # 3. 메인 맵 & 데이터 시각화
 col_map, col_data = st.columns([2.5, 1])
 
+# === 모드에 따른 화면 출력 분기 ===
 with col_map:
-    # 코어 로직 실행
-    raw_img, directions = system.process(active_fires)
     
-    # BGR -> RGB 및 HUD 적용 (고화질 변환)
-    hud_img = draw_hud(raw_img, active_fires)
-    final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
-    
-    # 맵 이미지 표시 (테두리 추가)
-    st.image(final_img, caption="Live CCTV Feed - Main Hall", use_container_width=True)
+    # [CASE 1] 가상 시뮬레이션 모드
+    if monitoring_mode == "Virtual Simulation":
+        if system is None:
+            st.error("❌ 배경 맵 파일(background.png)이 없습니다. 파일을 업로드해주세요.")
+        else:
+            # 코어 로직 실행
+            raw_img, directions = system.process(active_fires)
+            
+            # HUD 적용 및 출력
+            hud_img = draw_hud(raw_img, active_fires, mode="VIRTUAL")
+            final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
+            st.image(final_img, caption="Digital Twin Simulation", use_container_width=True)
+
+    # [CASE 2] 실시간 CCTV 모드
+    elif monitoring_mode == "Live CCTV (VPN)":
+        CAMERA_URL = "http://10.8.0.6:8080/?action=stream"
+        
+        # 이미지 표시용 플레이스홀더 (루프 성능 최적화)
+        image_spot = st.empty()
+        
+        # 스트림 연결 시도
+        cap = cv2.VideoCapture(CAMERA_URL)
+        
+        if not cap.isOpened():
+            st.error(f"❌ 카메라 연결 실패: {CAMERA_URL}")
+            st.info("💡 팁: VPN이 연결된 PC에서 로컬로 실행 중인지 확인하세요. (Streamlit Cloud에서는 접속 불가)")
+            directions = {} # 연결 실패 시 빈 데이터
+        else:
+            # 간단한 프레임 읽기 (주의: Streamlit은 루프가 길어지면 UI가 멈출 수 있음)
+            # 여기서는 한 프레임만 읽어서 보여주는 것이 아니라, 
+            # Streamlit의 특성상 st.image를 계속 갱신하려면 루프가 필요하지만,
+            # 전체 앱이 리프레시되는 구조이므로 여기서는 한 프레임을 캡처해서 보여주고
+            # 'Rerun'을 유도하거나, st.empty()로 루프를 돌립니다.
+            
+            # (방법) OpenCV로 프레임 1개 읽기 -> HUD 적용 -> 표시
+            ret, frame = cap.read()
+            if ret:
+                # 라이브 영상에도 가상 화재 경고(훈련 상황)를 오버레이 할 수 있음
+                hud_img = draw_hud(frame, active_fires, mode="LIVE")
+                final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
+                image_spot.image(final_img, caption=f"Real-time Feed: {CAMERA_URL}", use_container_width=True)
+            else:
+                st.warning("비디오 프레임을 읽을 수 없습니다.")
+                
+            # 리소스 해제
+            cap.release()
+            
+            # 실시간성을 위해 0.1초마다 리런 (사용자 경험에 따라 조절)
+            time.sleep(0.1)
+            st.rerun()
+
+        # CCTV 모드일 때는 방향 데이터가 계산되지 않음 (별도 로직 필요)
+        # 화면상 UI 깨짐 방지를 위해 가상 데이터 유지 혹은 비활성화
+        if system:
+            _, directions = system.process(active_fires) # 가상 데이터라도 계산해서 우측 패널 표시
+        else:
+            directions = {}
+
 
 with col_data:
     st.subheader("📡 IoT Node Status")
     st.markdown("실시간 유도등 방향 지시 상태")
+    
+    if not directions:
+        st.info("데이터 수신 대기 중...")
     
     for node, direction in directions.items():
         # 상태에 따른 아이콘 및 클래스 지정
