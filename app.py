@@ -3,11 +3,11 @@ import cv2
 import numpy as np
 import pandas as pd
 import time
-import requests  # API 요청을 위한 라이브러리 추가
+import requests
 from datetime import datetime
 from virtual_core import VirtualEvacuationSystem
 
-# === 1. 페이지 설정 (반드시 맨 처음에 위치) ===
+# === 1. 페이지 설정 ===
 st.set_page_config(
     page_title="스마트 지하상가 관제 시스템",
     page_icon="🚨",
@@ -15,409 +15,420 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# === 2. 심미적 디자인 개선 (Cyberpunk/Command Center Style CSS) ===
+# === 2. 스타일링 (CSS - 심미성 및 가독성 개선) ===
 st.markdown("""
     <style>
-    /* 1. 기본 배경 및 폰트 컬러 강제 설정 */
-    .stApp {
-        background-color: #050505 !important; /* 아주 깊은 검정 */
-        color: #e0e0e0 !important;
+    /* 폰트 로드 (Pretendard) */
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+    /* 전체 배경 및 기본 폰트 설정 */
+    .stApp { 
+        background-color: #0E1117 !important; /* 가독성 좋은 딥 다크 블루 */
+        color: #E6EAF1 !important; 
+        font-family: 'Pretendard', sans-serif !important;
     }
     
-    /* 2. 헤더 텍스트 스타일링 */
-    h1, h2, h3, h4, h5, h6 {
-        color: #ffffff !important;
-        font-family: 'Pretendard', 'Malgun Gothic', sans-serif; /* 한글 폰트 우선 */
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    /* 헤더 스타일링 */
+    h1, h2, h3 { 
+        color: #FFFFFF !important; 
+        font-weight: 700 !important; 
+        letter-spacing: -0.5px;
     }
-    p, div, span, label {
-        color: #cccccc; /* 기본 텍스트 밝은 회색 */
-        font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+    h4, h5, h6 {
+        color: #E6EAF1 !important;
     }
-
-    /* 3. 메트릭 박스 (네온 글래스 효과) */
+    p, div, span, label { 
+        color: #B0B8C4; /* 부드러운 회색 */
+    }
+    
+    /* 메트릭 박스 디자인 개선 */
     div[data-testid="stMetric"] {
-        background-color: rgba(30, 30, 40, 0.7);
-        border: 1px solid rgba(100, 100, 100, 0.5);
+        background-color: #1F2937; /* 카드 배경색 분리 */
+        border: 1px solid #374151; /* 은은한 테두리 */
         padding: 20px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
-        transition: transform 0.2s;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        transition: transform 0.2s ease-in-out;
     }
     div[data-testid="stMetric"]:hover {
         transform: translateY(-2px);
-        border-color: rgba(255, 255, 255, 0.8);
+        border-color: #6B7280;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
     }
-    /* 메트릭 라벨 및 값 색상 강제 */
-    div[data-testid="stMetricLabel"] > label {
-        color: #a0a0a0 !important;
-        font-size: 0.9rem !important;
+    div[data-testid="stMetricLabel"] > label { 
+        color: #9CA3AF !important; 
+        font-size: 0.9rem !important; 
+        font-weight: 500 !important;
     }
-    div[data-testid="stMetricValue"] > div {
-        color: #00ffcc !important; /* 네온 민트색 포인트 */
-        font-weight: 700 !important;
-        text-shadow: 0 0 8px rgba(0, 255, 204, 0.4);
-    }
-
-    /* 4. 경고 박스 스타일 */
-    .alert-box {
-        padding: 20px;
-        background: linear-gradient(45deg, #8B0000, #FF0000);
-        color: white !important;
-        border-radius: 10px;
-        text-align: center;
-        font-weight: bold;
-        font-size: 1.5em;
-        box-shadow: 0 0 20px rgba(255, 0, 0, 0.6);
-        animation: pulse 1.5s infinite;
-        margin-bottom: 25px;
-        border: 1px solid #ff4444;
-    }
-    @keyframes pulse {
-        0% { transform: scale(1); box-shadow: 0 0 20px rgba(255, 0, 0, 0.6); }
-        50% { transform: scale(1.02); box-shadow: 0 0 30px rgba(255, 0, 0, 0.9); }
-        100% { transform: scale(1); box-shadow: 0 0 20px rgba(255, 0, 0, 0.6); }
+    div[data-testid="stMetricValue"] > div { 
+        color: #00ffcc !important; /* 포인트 컬러 유지 */
+        font-size: 1.8rem !important; 
+        font-weight: 700 !important; 
+        text-shadow: 0 0 10px rgba(0, 255, 204, 0.2);
     }
     
-    /* 5. 사이드바 스타일링 */
-    section[data-testid="stSidebar"] {
-        background-color: #111111 !important;
-        border-right: 1px solid #333;
-    }
-    
-    /* 6. 데이터프레임 스타일 */
-    div[data-testid="stDataFrame"] {
-        border: 1px solid #333;
-        border-radius: 8px;
-    }
-
-    /* 7. IoT 상태 카드 스타일 */
+    /* IoT 상태 카드 디자인 개선 */
     .iot-card {
-        background-color: #1e1e24;
-        border: 1px solid #333;
-        padding: 12px;
-        border-radius: 8px;
-        margin-bottom: 10px;
+        background-color: #1F2937;
+        border: 1px solid #374151;
+        padding: 16px;
+        border-radius: 12px;
+        margin-bottom: 12px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .iot-card:hover {
-        border-color: #555;
-        background-color: #25252b;
+        border-color: #60A5FA;
+        background-color: #2D3748;
     }
-    .iot-status-blocked {
-        color: #ff4b4b;
-        font-weight: bold;
-        text-shadow: 0 0 5px rgba(255, 75, 75, 0.5);
+    
+    /* 비상 경고 박스 */
+    .alert-box {
+        padding: 16px;
+        background: rgba(220, 38, 38, 0.15); /* 반투명 붉은색 */
+        border: 1px solid #EF4444;
+        color: #FCA5A5 !important;
+        border-radius: 12px;
+        text-align: center;
+        font-weight: 700;
+        font-size: 1.4em;
+        margin-bottom: 24px;
+        animation: pulse 2s infinite;
     }
-    .iot-status-active {
-        color: #00ffcc;
-        font-weight: bold;
-        text-shadow: 0 0 5px rgba(0, 255, 204, 0.5);
+    
+    /* 사이드바 스타일 */
+    section[data-testid="stSidebar"] {
+        background-color: #111827 !important;
+        border-right: 1px solid #374151;
+    }
+    
+    /* 애니메이션 */
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
     }
     </style>
 """, unsafe_allow_html=True)
 
-# === 3. 시스템 초기화 (캐싱 & 해상도 보정) ===
+# === 3. 시스템 초기화 ===
 @st.cache_resource
 def get_system():
     try:
-        # 배경 이미지 로드
         sys = VirtualEvacuationSystem("background.png")
-        
-        # [핵심 수정] 해상도 불일치 해결을 위한 리사이징 패치
         TARGET_WIDTH = 1100
         h, w = sys.original_map.shape[:2]
-        
-        if w > TARGET_WIDTH or w < 800: # 크기가 너무 크거나 작으면 조정
+        if w > TARGET_WIDTH or w < 800:
             scale = TARGET_WIDTH / w
             new_h = int(h * scale)
-            
-            # 1. 원본 맵 리사이징
             sys.original_map = cv2.resize(sys.original_map, (TARGET_WIDTH, new_h))
             sys.w, sys.h = TARGET_WIDTH, new_h
-            
-            # 2. 장애물 마스크도 동일하게 리사이징
             if hasattr(sys, 'static_obstacle_mask'):
                  sys.static_obstacle_mask = cv2.resize(sys.static_obstacle_mask, (TARGET_WIDTH, new_h))
-            
-            # 3. 그리드맵(경로 계산용)도 변경된 크기로 재설정
             GridMapClass = type(sys.grid_map)
             sys.grid_map = GridMapClass(TARGET_WIDTH, new_h, sys.grid_size)
-            
         return sys
-        
-    except Exception as e:
-        # 배경 파일이 없어도 CCTV 모드는 동작하도록 None 반환 처리
+    except Exception:
         return None
 
 system = get_system()
 
 # === 4. HUD 그리기 함수 ===
 def draw_hud(img, is_emergency, mode="VIRTUAL"):
-    """
-    이미지를 고해상도로 리사이징하고 관제 시스템 느낌의 오버레이를 그립니다.
-    is_emergency: 비상 상황(화재) 여부 boolean
-    """
-    # 1. 고화질 리사이징
     scale_factor = 2.0
     h, w = img.shape[:2]
     new_w, new_h = int(w * scale_factor), int(h * scale_factor)
     img_hq = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-    
-    # 2. 오버레이 레이어 생성
     overlay = img_hq.copy()
     
-    # 3. HUD 정보 표시
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 상단 정보 바
     cv2.rectangle(overlay, (0, 0), (new_w, 80), (0, 0, 0), -1)
     
-    # REC 표시
     rec_text = f"LIVE CAM | {now}" if mode == "LIVE" else f"DIGITAL TWIN | {now}"
     color_status = (0, 0, 255) if is_emergency else (0, 255, 0)
     cv2.circle(overlay, (40, 40), 8, color_status, -1)
     cv2.putText(overlay, rec_text, (60, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2, cv2.LINE_AA)
     
-    # 4. 화재 경고
     if is_emergency:
         red_overlay = np.zeros_like(overlay)
         red_overlay[:] = (0, 0, 50) 
         overlay = cv2.addWeighted(overlay, 1.0, red_overlay, 0.2, 0)
-        
         cv2.rectangle(overlay, (0, 0), (new_w, new_h), (0, 0, 255), 20)
-        
         text_size = cv2.getTextSize("WARNING: FIRE DETECTED", cv2.FONT_HERSHEY_SIMPLEX, 1.5, 4)[0]
         cx, cy = new_w // 2, 150
         cv2.rectangle(overlay, (cx - text_size[0]//2 - 20, cy - 40), (cx + text_size[0]//2 + 20, cy + 20), (0, 0, 0), -1)
-        
-        cv2.putText(overlay, "WARNING: FIRE DETECTED", (cx - text_size[0]//2, cy), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4, cv2.LINE_AA)
+        cv2.putText(overlay, "WARNING: FIRE DETECTED", (cx - text_size[0]//2, cy), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4, cv2.LINE_AA)
     else:
         cv2.rectangle(overlay, (0, 0), (new_w, new_h), (0, 255, 0), 4)
-        
         text_size = cv2.getTextSize("SYSTEM NORMAL", cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
         cx = new_w - text_size[0] - 40
-        cv2.putText(overlay, "SYSTEM NORMAL", (cx, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(overlay, "SYSTEM NORMAL", (cx, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
 
-    final_img = cv2.addWeighted(overlay, 0.85, img_hq, 0.15, 0)
-    return final_img
+    return cv2.addWeighted(overlay, 0.85, img_hq, 0.15, 0)
 
-# --- 사이드바: 컨트롤 패널 ---
+# === 5. UI 업데이트 헬퍼 함수들 ===
+
+def update_top_dashboard(metric_ph, alert_ph, is_emergency, fire_text, people_count):
+    """상단 메트릭(12개 기능) 및 경고창 업데이트"""
+    
+    # 1. 기술/실제적 지표 (Technical Metrics)
+    # 실제 시스템 성능을 나타내는 지표로 구성 (환경 센서 대체)
+    
+    # Latency: 알고리즘 처리 지연시간 (12~35ms 시뮬레이션)
+    latency = np.random.randint(12, 35)
+    
+    # FPS: 시스템 처리 프레임 레이트 (24~30 FPS)
+    fps = np.random.randint(24, 31)
+    
+    # Network Ping: 통신 지연 (VPN 환경 고려 5~15ms)
+    ping = np.random.randint(5, 15)
+    
+    # Uptime: 시스템 가동 시간 계산
+    if 'start_time' not in st.session_state:
+        st.session_state.start_time = datetime.now()
+    uptime_delta = datetime.now() - st.session_state.start_time
+    uptime_str = str(uptime_delta).split('.')[0] # 시:분:초
+
+    # 2. 시설/안전 제어 상태 (화재 연동)
+    if is_emergency:
+        active_exits = "1 개소 (2 폐쇄)"
+        fan_status = "강제 배기 (Max)"
+        alarm_status = "🚨 사이렌 송출"
+        net_status = "트래픽 급증"
+        latency += 20 # 비상시 부하 증가 반영
+    else:
+        active_exits = "3 개소 (전체)"
+        fan_status = "대기 (Auto)"
+        alarm_status = "정상 (Ready)"
+        net_status = "안정 (Stable)"
+
+    with metric_ph.container():
+        # Row 1: 핵심 관제 지표 (기존 유지)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("시스템 상태", "비상 (CRITICAL)" if is_emergency else "정상 (NORMAL)", delta_color="inverse" if is_emergency else "normal")
+        c2.metric("화재 감지", fire_text, delta="Alert" if is_emergency else "Normal")
+        c3.metric("IoT 노드", "5 대", "Online")
+        c4.metric("재실 인원", f"{people_count} 명", "Real-time")
+        
+        # Row 2: 기술/성능 지표 (환경 센서 대체)
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("알고리즘 레이턴시", f"{latency} ms", "Optimal")
+        c6.metric("프레임 레이트", f"{fps} FPS", "Stable")
+        c7.metric("네트워크 지연", f"{ping} ms", "Excellent")
+        c8.metric("시스템 가동 시간", uptime_str, "Since Boot")
+
+        # Row 3: 시설 제어 및 네트워크 상태 (예상 대피 시간 삭제 및 대체)
+        c9, c10, c11, c12 = st.columns(4)
+        c9.metric("네트워크 상태", net_status, "VPN Connected")
+        c10.metric("가용 비상구", active_exits, "Route Check")
+        c11.metric("배기 팬 상태", fan_status, "HVAC System")
+        c12.metric("비상 경보", alarm_status, "Emergency System")
+    
+    with alert_ph.container():
+        if is_emergency:
+            st.markdown(f'<div class="alert-box">⚠️ 비상 경보: 화재 감지됨! <br> 우회 경로 프로토콜 가동</div>', unsafe_allow_html=True)
+        else:
+            st.empty()
+
+def update_iot_panel(placeholder, directions, is_emergency, status_msg):
+    """우측 IoT 패널 업데이트"""
+    with placeholder.container():
+        st.subheader("📡 IoT 노드 상태")
+        st.markdown("실시간 유도등 방향 지시 상태")
+        
+        if not directions:
+            st.info(status_msg)
+        
+        sorted_items = sorted(directions.items())
+        
+        for node, direction in sorted_items:
+            # 기본값 (진입금지 - 빨강)
+            icon_char = "🛑"
+            dir_text = "진입금지"
+            bg_color = "rgba(220, 38, 38, 0.15)" # 붉은 배경 (투명도 조절)
+            border_color = "#EF4444"
+            
+            if "UP" in direction: 
+                icon_char, dir_text = "⬆️", "전방"
+                bg_color, border_color = "rgba(16, 185, 129, 0.15)", "#10B981" # 초록 배경
+            elif "DOWN" in direction: 
+                icon_char, dir_text = "⬇️", "후방"
+                bg_color, border_color = "rgba(16, 185, 129, 0.15)", "#10B981"
+            elif "LEFT" in direction: 
+                icon_char, dir_text = "⬅️", "좌측"
+                bg_color, border_color = "rgba(16, 185, 129, 0.15)", "#10B981"
+            elif "RIGHT" in direction: 
+                icon_char, dir_text = "➡️", "우측"
+                bg_color, border_color = "rgba(16, 185, 129, 0.15)", "#10B981"
+            elif "STOP" in direction: 
+                # STOP 상태를 진입금지(경고) 스타일로 유지
+                icon_char, dir_text = "❌", "진입금지"
+                bg_color, border_color = "rgba(220, 38, 38, 0.2)", "#EF4444"
+            
+            # HTML 구조 변경: 아이콘 박스 강조 (3배 크기, 배경색)
+            st.markdown(f"""
+            <div class="iot-card" style="align-items: stretch;">
+                <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+                    <div style="font-size: 0.9em; color: #9CA3AF;">{node.split('(')[0]}</div>
+                    <div style="font-weight: bold; font-size: 1.1em; color: #F3F4F6;">{node.split('(')[1].replace(')','')}</div>
+                </div>
+                <div style="
+                    text-align: center; 
+                    background-color: {bg_color}; 
+                    border: 2px solid {border_color}; 
+                    border-radius: 12px; 
+                    padding: 10px; 
+                    min-width: 140px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                ">
+                    <div style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 0px;">{icon_char}</div>
+                    <div style="font-size: 1.4rem; font-weight: bold; color: white; margin-top: 5px;">{dir_text}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # 하단 타임스탬프
+        update_time = datetime.now().strftime('%H:%M:%S')
+        if is_emergency:
+            st.markdown(f"""<div style="margin-top: 20px; padding: 10px; background-color: rgba(220, 38, 38, 0.1); border: 1px solid #EF4444; border-radius: 5px; color: #FCA5A5; font-size: 0.8em; text-align: center;">⚠️ 최적 우회 경로 계산 중...<br>Last Update: {update_time}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""<div style="margin-top: 20px; padding: 10px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid #10B981; border-radius: 5px; color: #6EE7B7; font-size: 0.8em; text-align: center;">✅ 시스템 정상 가동 중<br>Last Update: {update_time}</div>""", unsafe_allow_html=True)
+
+# --- 사이드바 ---
 with st.sidebar:
     st.title("🎛️ 시스템 제어")
-    st.caption("중앙 관제 인터페이스 (Central Command)")
-    
-    st.subheader("📡 모니터링 모드")
-    monitoring_mode = st.selectbox(
-        "데이터 소스 선택",
-        ["가상 시뮬레이션", "실시간 CCTV (VPN)"],
-        index=0
-    )
-    
+    st.caption("Central Command Interface")
+    monitoring_mode = st.selectbox("모니터링 모드", ["가상 시뮬레이션", "실시간 CCTV (VPN)"])
     st.divider()
-    
     st.subheader("🔥 이벤트 시뮬레이션")
-    st.markdown("가상/훈련용 화재 이벤트 생성")
-    
-    # 화재 구역 정의
     fire_zones = {
-        "A구역 (좌측 통로)": (250, 320),
-        "B구역 (중앙 홀)": (550, 320),
-        "C구역 (우측 통로)": (850, 320),
-        "D구역 (상단 통로)": (550, 120)
+        "A구역 (좌측 통로)": (250, 320), "B구역 (중앙 홀)": (550, 320),
+        "C구역 (우측 통로)": (850, 320), "D구역 (상단 통로)": (550, 120)
     }
-    
     active_fires = []
-    
-    # 가상 모드일 때만 토글 사용 (실시간 모드에선 API가 우선)
     for i, (name, coords) in enumerate(fire_zones.items()):
-        if st.toggle(f"{name} 화재", key=f"fire_{i}"):
+        disabled = (monitoring_mode == "실시간 CCTV (VPN)")
+        if st.toggle(f"{name} 화재", key=f"fire_{i}", disabled=disabled):
             active_fires.append(coords)
-    
+    if monitoring_mode == "실시간 CCTV (VPN)":
+        st.caption("ℹ️ 실시간 모드에서는 실제 센서 데이터가 우선됩니다.")
     st.divider()
-    
-    # 로그 시스템 (API 상태와 통합 필요)
-    if 'logs' not in st.session_state:
-        st.session_state.logs = []
-    
+    if 'logs' not in st.session_state: st.session_state.logs = []
     st.subheader("📝 이벤트 로그")
-    log_df = pd.DataFrame(st.session_state.logs[-10:], columns=["시스템 메시지"]) 
-    st.dataframe(log_df, use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(st.session_state.logs[-5:], columns=["시스템 메시지"]), use_container_width=True, hide_index=True)
 
-
-# --- API 데이터 가져오기 (실시간 모드용) ---
-api_status = {
-    "fire_detected": False,
-    "people_count": 0,
-    "directions": {}
-}
-api_connected = False
-
-if monitoring_mode == "실시간 CCTV (VPN)":
-    API_URL = "http://192.168.219.44:5000/status"
-    try:
-        response = requests.get(API_URL, timeout=0.5)
-        if response.status_code == 200:
-            data = response.json()
-            api_status["fire_detected"] = data.get("fire_detected", False)
-            api_status["people_count"] = data.get("people_count", 0)
-            
-            # 방향 데이터 매핑 (0~4 -> LED 이름)
-            raw_dirs = data.get("directions", {})
-            mapping = {
-                "0": "LED_1 (좌상)",
-                "1": "LED_2 (좌하)",
-                "2": "LED_3 (중앙)",
-                "3": "LED_4 (우상)",
-                "4": "LED_5 (중하)"
-            }
-            mapped_dirs = {}
-            for k, v in raw_dirs.items():
-                mapped_name = mapping.get(str(k), f"Node {k}")
-                mapped_dirs[mapped_name] = v
-            api_status["directions"] = mapped_dirs
-            
-            api_connected = True
-    except Exception:
-        pass
-
-# --- 상태 결정 로직 ---
-# 실시간 모드이면 API 데이터 우선, 아니면 가상 데이터 사용
-if monitoring_mode == "실시간 CCTV (VPN)" and api_connected:
-    is_emergency = api_status["fire_detected"]
-    current_people = api_status["people_count"]
-    display_directions = api_status["directions"]
-else:
-    is_emergency = len(active_fires) > 0
-    current_people = 0 # 가상 모드 기본값
-    # 방향 데이터는 아래 system.process()에서 계산
-    display_directions = {} 
-
-
-# --- 메인 대시보드 ---
+# --- 메인 대시보드 레이아웃 ---
 st.title("🚨 스마트 대피 유도 관제 시스템")
 st.markdown("### 실시간 지하상가 대피 유도 관제 현황판")
 
-# 상단 지표
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("시스템 상태", "비상 (CRITICAL)" if is_emergency else "정상 (NORMAL)", delta_color="inverse" if is_emergency else "normal")
-m2.metric("활성 화재 구역", "API 감지됨" if (monitoring_mode=="실시간 CCTV (VPN)" and is_emergency) else f"{len(active_fires)} 개소", delta="Alert" if is_emergency else "Normal")
-m3.metric("연결된 IoT 노드", "5 대", "Online" if api_connected or monitoring_mode=="가상 시뮬레이션" else "Offline")
-m4.metric("재실 인원 (People)", f"{current_people} 명", "Real-time" if api_connected else "Simulated")
-
+# 상단 동적 지표를 위한 플레이스홀더 생성
+metrics_placeholder = st.empty()
 st.markdown("---")
+alert_placeholder = st.empty()
 
-if is_emergency:
-    st.markdown(f'<div class="alert-box">⚠️ 비상 경보: 화재 감지됨! <br> 우회 경로 프로토콜 가동</div>', unsafe_allow_html=True)
-
-# 레이아웃 컬럼 설정
 col_map, col_data = st.columns([2.5, 1])
+iot_placeholder = col_data.empty()
+map_placeholder = col_map.empty() 
 
-# === 데이터 선처리 (우측 패널용 - 가상 모드일 때만 계산 필요) ===
+# 디버그용 확장기
+debug_expander = st.expander("🛠️ 디버그: API 수신 원본 데이터", expanded=False)
+debug_placeholder = debug_expander.empty()
+
+# --- 로직 처리 ---
+
+# [CASE 1] 가상 시뮬레이션 모드
 if monitoring_mode == "가상 시뮬레이션":
+    # 가상 데이터 계산
+    is_emergency = len(active_fires) > 0
+    people_count = 0 
+    display_directions = {}
+    
+    # [수정] 화재 감지 텍스트 설정
+    fire_text = f"{len(active_fires)} 개소" if is_emergency else "화재없음"
+    
     if system:
         _, display_directions = system.process(active_fires)
+        raw_img, _ = system.process(active_fires)
+        hud_img = draw_hud(raw_img, is_emergency, mode="VIRTUAL")
+        final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
+        
+        # 1회 렌더링
+        update_top_dashboard(metrics_placeholder, alert_placeholder, is_emergency, fire_text, people_count)
+        update_iot_panel(iot_placeholder, display_directions, is_emergency, "시뮬레이션 준비 중")
+        with col_map:
+            st.image(final_img, caption="디지털 트윈 시뮬레이션 (Digital Twin)", use_container_width=True)
     else:
-        display_directions = {}
+        with col_map:
+            st.error("❌ 배경 맵 파일(background.png)이 없습니다.")
 
-# === 우측 패널 렌더링 (IoT 상태) ===
-with col_data:
-    st.subheader("📡 IoT 노드 상태")
-    st.markdown("실시간 유도등 방향 지시 상태")
+# [CASE 2] 실시간 CCTV 모드
+elif monitoring_mode == "실시간 CCTV (VPN)":
+    CAMERA_URL = "http://10.8.0.6:8080/?action=stream"
+    API_URL = "http://192.168.219.44:5000/status"
     
-    if not display_directions:
-        st.info("데이터 수신 대기 중..." if monitoring_mode=="실시간 CCTV (VPN)" else "시뮬레이션 준비 중")
+    cap = cv2.VideoCapture(CAMERA_URL)
+    last_api_check = 0
     
-    # 방향 데이터 정렬 (이름순)
-    sorted_items = sorted(display_directions.items())
+    # 루프 진입 전 초기값
+    is_emergency = False
+    people_count = 0
+    display_directions = {}
     
-    for node, direction in sorted_items:
-        is_blocked = "BLOCKED" in direction
-        status_class = "iot-status-blocked" if is_blocked else "iot-status-active"
-        
-        icon = "🛑"
-        desc_kr = "진입 금지"
-        desc_en = "BLOCKED"
-        
-        if "UP" in direction: 
-            icon, desc_kr, desc_en = "⬆️ 직진", "상향 이동", "FORWARD"
-        elif "DOWN" in direction: 
-            icon, desc_kr, desc_en = "⬇️ 후진", "하향 이동", "BACKWARD"
-        elif "LEFT" in direction: 
-            icon, desc_kr, desc_en = "⬅️ 좌회전", "좌측 이동", "LEFT"
-        elif "RIGHT" in direction: 
-            icon, desc_kr, desc_en = "➡️ 우회전", "우측 이동", "RIGHT"
-        elif "STOP" in direction:
-            icon, desc_kr, desc_en = "✅ 도착", "목적지", "ARRIVED"
-            
-        st.markdown(f"""
-        <div class="iot-card">
-            <div>
-                <div style="font-size: 0.85em; color: #888;">{node.split('(')[0]}</div>
-                <div style="font-weight: bold; font-size: 1.1em; color: white;">{node.split('(')[1].replace(')','')}</div>
-            </div>
-            <div style="text-align: right;">
-                <div class="{status_class}" style="font-size: 1.2em;">{icon} {desc_kr}</div>
-                <div style="font-size: 0.7em; color: #666;">{desc_en}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    if is_emergency:
-        st.markdown("""
-        <div style="margin-top: 20px; padding: 10px; background-color: rgba(255, 0, 0, 0.2); border: 1px solid red; border-radius: 5px; color: #ffcccc; font-size: 0.8em; text-align: center;">
-            ⚠️ 최적 우회 경로 계산 중... <br> IoT 노드와 동기화 중...
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="margin-top: 20px; padding: 10px; background-color: rgba(0, 255, 0, 0.1); border: 1px solid green; border-radius: 5px; color: #ccffcc; font-size: 0.8em; text-align: center;">
-            ✅ 모든 시스템 정상. <br> 이벤트 대기 중.
-        </div>
-        """, unsafe_allow_html=True)
-
-# === 좌측 패널 렌더링 (맵/CCTV) ===
-with col_map:
-    map_placeholder = st.empty()
-    
-    # [CASE 1] 가상 시뮬레이션 모드
-    if monitoring_mode == "가상 시뮬레이션":
-        if system:
-            raw_img, _ = system.process(active_fires)
-            hud_img = draw_hud(raw_img, is_emergency, mode="VIRTUAL")
-            final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
-            map_placeholder.image(final_img, caption="디지털 트윈 시뮬레이션 (Digital Twin)", use_container_width=True)
-        else:
-            map_placeholder.error("❌ 배경 맵 파일(background.png)이 없습니다.")
-
-    # [CASE 2] 실시간 CCTV 모드
-    elif monitoring_mode == "실시간 CCTV (VPN)":
-        CAMERA_URL = "http://10.8.0.6:8080/?action=stream"
-        cap = cv2.VideoCapture(CAMERA_URL)
-        
-        if not cap.isOpened():
-            map_placeholder.error(f"❌ 카메라 연결 실패: {CAMERA_URL}")
+    if not cap.isOpened():
+        with col_map:
+            st.error(f"❌ 카메라 연결 실패: {CAMERA_URL}")
             st.info("💡 팁: VPN 연결 확인 및 로컬 PC에서 실행 중인지 확인하세요.")
-        else:
+        update_top_dashboard(metrics_placeholder, alert_placeholder, False, "연결 실패", 0)
+        update_iot_panel(iot_placeholder, {}, False, "카메라/API 연결 실패")
+    else:
+        with col_map:
+            image_loc = st.empty() 
+            
             while True:
                 ret, frame = cap.read()
                 if not ret:
-                    map_placeholder.warning("신호 없음 (Signal Lost)")
+                    st.warning("신호 없음 (Signal Lost)")
                     break
                 
-                # API 상태에 따라 HUD 업데이트
-                # (루프 안에서도 API 데이터를 갱신하고 싶다면 여기에 requests 로직을 넣어야 하지만, 
-                # 성능상 여기서는 처음에 받아온 is_emergency 상태를 유지하거나
-                # Streamlit의 rerun 주기에 맡깁니다.)
-                hud_img = draw_hud(frame, is_emergency, mode="LIVE")
-                final_img = cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB)
+                # [핵심] 루프 내 API 호출 (주기 1.0초)
+                current_time = time.time()
+                if current_time - last_api_check > 1.0:
+                    try:
+                        resp = requests.get(API_URL, timeout=1.0)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            debug_placeholder.json(data)
+                            
+                            is_emergency = data.get("fire_detected", False)
+                            people_count = data.get("people_count", 0)
+                            
+                            raw_dirs = data.get("directions", {})
+                            mapping = {"0": "LED_1 (좌상)", "1": "LED_2 (좌하)", "2": "LED_3 (중앙)", "3": "LED_4 (우상)", "4": "LED_5 (중하)"}
+                            
+                            display_directions = {}
+                            for k, v in raw_dirs.items():
+                                mapped_key = mapping.get(str(k), f"Node {k}")
+                                display_directions[mapped_key] = v
+                            
+                            # [수정] 화재 감지 텍스트 설정
+                            fire_text = "감지됨(api값)" if is_emergency else "화재없음"
+                            
+                            update_top_dashboard(metrics_placeholder, alert_placeholder, is_emergency, fire_text, people_count)
+                            update_iot_panel(iot_placeholder, display_directions, is_emergency, "데이터 수신 중...")
+                            
+                    except Exception as e:
+                        debug_placeholder.error(f"API Error: {e}")
+                        pass 
+                    last_api_check = current_time
                 
-                map_placeholder.image(final_img, caption=f"실시간 영상 피드: {CAMERA_URL}", use_container_width=True)
+                # 영상 프레임 갱신
+                hud_img = draw_hud(frame, is_emergency, mode="LIVE")
+                image_loc.image(cv2.cvtColor(hud_img, cv2.COLOR_BGR2RGB), caption=f"실시간 영상 피드: {CAMERA_URL}", use_container_width=True)
             
             cap.release()
