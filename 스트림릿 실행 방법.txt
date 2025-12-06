@@ -1,0 +1,5 @@
+스트림릿 gui 실행 방법
+
+app.py가 스트림릿 gui 정보가 담겨있는 코드임.
+app.py를 그냥 실행하면 안되고
+streamlit run app.py 라고 해야 실행 됨.
